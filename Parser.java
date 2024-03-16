@@ -45,7 +45,7 @@ public class Parser {
         // Call the parseProg method for the first grammar rule (PROG) and return the node
 
         // Build tree
-        ProgramNode root = parseProg(s, true);
+        ProgramNode root = parseProg(s);
 
         // Check for uneven brackets
         if(!bracketStack.isEmpty()) { throw new ParserFailureException("Bracket number uneven"); }
@@ -61,17 +61,25 @@ public class Parser {
     /**
      * Parse the PROG statements
      */
-    private ProgramNode parseProg(Scanner s, Boolean recurse){
+    private ProgramNode parseProg(Scanner s){
+        List<ProgramNode> children = new ArrayList<>();
+
         // Base case
-        if (!s.hasNext()) {return null;}
+        while (s.hasNext()) {
+            children.add(parseStmt(s));
+        }
 
-        // Check contents of file
-        if (s.hasNext(ACT)) { return parseAct(s, recurse); }
-        if (s.hasNext("loop")) { return parseLoop(s); }
-        if (s.hasNext("if")) { return parseIf(s); }
+        return new Prog(children);
+    }
 
-        fail(String.format("PROG - STMT statement incorrect. Expecting STMT but got %s", s.next()), s);
-        return null;
+    /**
+     * Parse the STMT statement
+     */
+    private ProgramNode parseStmt(Scanner s){
+        if (s.hasNext(ACT)) { return(parseAct(s)); }
+        else if (s.hasNext("loop")) { return(parseLoop(s)); }
+        else if (s.hasNext("if")) { return(parseIf(s)); }
+        else {fail("Expected STMT", s); return null;}
     }
 
     /**
@@ -80,39 +88,39 @@ public class Parser {
      * Returns a different ACT ProgramNode depending on the 
      * next scanner string or throw error if it's undefined
      */
-    private ProgramNode parseAct(Scanner s, Boolean recurse){
+    private ProgramNode parseAct(Scanner s){
         // Base case
         if(!s.hasNext()) {return null;}
 
         // Error checking
         String action = s.next();
-        require(";", "expecting: ;   got: ", s);
+        require(";", "expecting: ;  At parseAct", s);
         
 
-        // Recursion
+        // returns
         if (action.equals("move")) {
-            return new Move(recurseAct(s, recurse));
+            return new Move();
         } 
         else if (action.equals("turnL")) {
-            return new TurnL(recurseAct(s, recurse));
+            return new TurnL();
         } 
         else if (action.equals("turnR")) {
-            return new TurnR(recurseAct(s, recurse));
+            return new TurnR();
         } 
         else if (action.equals("takeFuel")) {
-            return new TakeFuel(recurseAct(s, recurse));
+            return new TakeFuel();
         } 
         else if (action.equals("wait")) {
-            return new Wait(recurseAct(s, recurse));
+            return new Wait();
         } 
         else if (action.equals("shieldOn")) {
-            return new ShieldOn(recurseAct(s, recurse));
+            return new ShieldOn();
         }
         else if (action.equals("shieldOff")) {
-            return new ShieldOff(recurseAct(s, recurse));
+            return new ShieldOff();
         }
         else if (action.equals("turnAround")) {
-            return new TurnAround(recurseAct(s, recurse));
+            return new TurnAround();
         }
         else {
             fail(String.format("expected ACTION node, got %s", action), s);
@@ -148,7 +156,7 @@ public class Parser {
 
         // loop through all of the nodes and add them linearly
         while (!s.hasNext(CLOSEBRACE) && s.hasNext()){
-            nodes.add(parseProg(s, false));
+            nodes.add(parseStmt(s));
         }
 
         // Syntax checks
@@ -266,14 +274,6 @@ public class Parser {
         }
     }
 
-    /**
-     * Helper function to determin whether to recurse or not
-     */
-    private ProgramNode recurseAct(Scanner s, Boolean recurse){
-        if (recurse) { return parseProg(s, true); }
-        else {return null;}
-    }
-
     //----------------------------------------------------------------
     // utility methods for the parser
     // - fail(..) reports a failure and throws exception
@@ -379,29 +379,41 @@ interface SensNode {
  *                          Classes
  */
 
+ /**
+  * The root of the AST
+  */
+class Prog implements ProgramNode{
+    List<ProgramNode> children = new ArrayList<>();
+
+    public Prog(List<ProgramNode> children){
+        this.children = children;
+    }
+
+    @Override
+    public void execute(Robot robot) {
+        for (ProgramNode child : children){
+            child.execute(robot);
+        }
+    }
+    
+    @Override
+    public String toString(){
+        return children.toString();
+    }
+}
+
+
 /**
  * Move robot and if there's a next instructin, exicute it
  */
 class Move implements ProgramNode{
-    private ProgramNode cNode;
 
-    public Move(ProgramNode child){
-        cNode = child;
-    }
-    
     @Override
-    public void execute(Robot robot) {
-        robot.move();
-        if (cNode != null){
-            cNode.execute(robot);
-        }
-    }
+    public void execute(Robot robot) { robot.move(); }
 
     @Override
     public String toString(){
-        if (cNode != null){return "move " + cNode.toString();}
-        else {return "move";}
-        
+        return "move";
     }
 }
 
@@ -409,25 +421,13 @@ class Move implements ProgramNode{
  * wait and if there's a next instructin, exicute it
  */
 class Wait implements ProgramNode{
-    private ProgramNode cNode;
 
-    public Wait(ProgramNode child){
-        cNode = child;
-    }
-    
     @Override
-    public void execute(Robot robot) {
-        robot.idleWait();
-        if (cNode != null){
-            cNode.execute(robot);
-        }
-    }
+    public void execute(Robot robot) { robot.idleWait(); }
 
     @Override
     public String toString(){
-        if (cNode != null){return "Wait " + cNode.toString();}
-        else {return "Wait";}
-        
+        return "Wait"; 
     }
 }
 
@@ -435,25 +435,13 @@ class Wait implements ProgramNode{
  * turn left and if there's a next instructin, exicute it
  */
 class TurnL implements ProgramNode{
-    private ProgramNode cNode;
 
-    public TurnL(ProgramNode child){
-        cNode = child;
-    }
-    
     @Override
-    public void execute(Robot robot) {
-        robot.turnLeft();
-        if (cNode != null){
-            cNode.execute(robot);
-        }
-    }
+    public void execute(Robot robot) { robot.turnLeft(); }
 
     @Override
     public String toString(){
-        if (cNode != null){return "Turn Left " + cNode.toString();}
-        else {return "TurnL";}
-        
+        return "TurnL";
     }
 }
 
@@ -461,25 +449,13 @@ class TurnL implements ProgramNode{
  * turn right and if there's a next instructin, exicute it
  */
 class TurnR implements ProgramNode{
-    private ProgramNode cNode;
 
-    public TurnR(ProgramNode child){
-        cNode = child;
-    }
-    
     @Override
-    public void execute(Robot robot) {
-        robot.turnRight();
-        if (cNode != null){
-            cNode.execute(robot);
-        }
-    }
+    public void execute(Robot robot) { robot.turnRight(); }
 
     @Override
     public String toString(){
-        if (cNode != null){return "TurnR " + cNode.toString();}
-        else {return "TurnR";}
-        
+        return "TurnR";
     }
 }
 
@@ -487,25 +463,13 @@ class TurnR implements ProgramNode{
  * take fuel and if there's a next instructin, exicute it
  */
 class TakeFuel implements ProgramNode{
-    private ProgramNode cNode;
 
-    public TakeFuel(ProgramNode child){
-        cNode = child;
-    }
-    
     @Override
-    public void execute(Robot robot) {
-        robot.takeFuel();
-        if (cNode != null){
-            cNode.execute(robot);
-        }
-    }
+    public void execute(Robot robot) { robot.takeFuel(); }
 
     @Override
     public String toString(){
-        if (cNode != null){return "Take Fuel " + cNode.toString();}
-        else {return "TakeFuel";}
-        
+        return "TakeFuel";
     }
 }
 
@@ -513,25 +477,13 @@ class TakeFuel implements ProgramNode{
  * Turn around and if there's a next instructin, exicute it
  */
 class TurnAround implements ProgramNode{
-    private ProgramNode cNode;
 
-    public TurnAround(ProgramNode child){
-        cNode = child;
-    }
-    
     @Override
-    public void execute(Robot robot) {
-        robot.turnAround();
-        if (cNode != null){
-            cNode.execute(robot);
-        }
-    }
+    public void execute(Robot robot) { robot.turnAround(); }
 
     @Override
     public String toString(){
-        if (cNode != null){return "Take Fuel " + cNode.toString();}
-        else {return "TakeFuel";}
-        
+        return "TakeFuel";
     }
 }
 
@@ -539,25 +491,13 @@ class TurnAround implements ProgramNode{
  * Set shield to on and if there's a next instructin, exicute it
  */
 class ShieldOn implements ProgramNode{
-    private ProgramNode cNode;
 
-    public ShieldOn(ProgramNode child){
-        cNode = child;
-    }
-    
     @Override
-    public void execute(Robot robot) {
-        robot.setShield(true);
-        if (cNode != null){
-            cNode.execute(robot);
-        }
-    }
+    public void execute(Robot robot) { robot.setShield(true);}
 
     @Override
     public String toString(){
-        if (cNode != null){return "Take Fuel " + cNode.toString();}
-        else {return "TakeFuel";}
-        
+        return "TakeFuel";
     }
 }
 
@@ -565,24 +505,13 @@ class ShieldOn implements ProgramNode{
  * Set shield to off and if there's a next instructin, exicute it
  */
 class ShieldOff implements ProgramNode{
-    private ProgramNode cNode;
 
-    public ShieldOff(ProgramNode child){
-        cNode = child;
-    }
-    
     @Override
-    public void execute(Robot robot) {
-        robot.setShield(false);
-        if (cNode != null){
-            cNode.execute(robot);
-        }
-    }
+    public void execute(Robot robot) { robot.setShield(false); }
 
     @Override
     public String toString(){
-        if (cNode != null){return "Take Fuel " + cNode.toString();}
-        else {return "TakeFuel";}
+        return "TakeFuel";
     }
 }
 
