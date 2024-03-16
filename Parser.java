@@ -76,10 +76,14 @@ public class Parser {
      * Parse the STMT statement
      */
     private ProgramNode parseStmt(Scanner s){
-        if (s.hasNext(ACT)) { return(parseAct(s)); }
-        else if (s.hasNext("loop")) { return(parseLoop(s)); }
-        else if (s.hasNext("if")) { return(parseIf(s)); }
-        else {fail("Expected STMT", s); return null;}
+        if (s.hasNext(ACT))                     { return(parseAct(s)); }
+        else if (s.hasNext("loop"))     { return(parseLoop(s)); }
+        else if (s.hasNext("if"))       { return(parseIf(s)); }
+        else if (s.hasNext("while"))    { return(parseWhile(s)); }
+        else {
+            fail("Expected STMT", s); 
+            return null;
+        }
     }
 
     /**
@@ -178,6 +182,17 @@ public class Parser {
         return new If(childList, cond);
     }
 
+    /**
+     * Parse the If statement
+     * Retuens a If node
+     */
+    private ProgramNode parseWhile(Scanner s){
+        require("while", "expected while", s);
+        BoolNode cond = parseCond(s);
+        List<ProgramNode> childList = parseBlock(s);
+
+        return new While(childList, cond);
+    }
 
     /**
      * Parse the COND statement
@@ -401,7 +416,6 @@ class Prog implements ProgramNode{
         return children.toString();
     }
 }
-
 
 /**
  * Move robot and if there's a next instructin, exicute it
