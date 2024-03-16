@@ -1,0 +1,7 @@
+move;
+turnL;
+move;
+turnR;
+turnAround;
+shieldOn;
+shieldOff;
