@@ -44,7 +44,7 @@ public class ParserTester2{
                     String printedForm = (ast!=null)?ast.toString().replaceAll("\\n", " "):"null tree";
                     if (valid){
                         if (ast!=null){System.out.println("OK, valid program: "+printedForm);}
-                        else          {System.out.println("BAD, failed to generate tree for valid program");}
+                        else          {System.out.println("BAD, failed to g  enerate tree for valid program");}
                     }
                     else {
                         if (ast!=null){System.out.println("BAD, program is invalid, parser gave: "+printedForm);}

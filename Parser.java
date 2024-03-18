@@ -2,6 +2,8 @@ import java.lang.reflect.Array;
 import java.util.*;
 import java.util.regex.*;
 
+import javax.naming.InterruptedNamingException;
+
 /**
  * See assignment handout for the grammar.
  * You need to implement the parse(..) method and all the rest of the parser.
@@ -18,19 +20,12 @@ public class Parser {
     static final Pattern OPENBRACE = Pattern.compile("\\{");
     static final Pattern CLOSEBRACE = Pattern.compile("\\}");
 
-    // Patterns for the categories
+    // Patterns for the bigger categories
     static final Pattern ACT = Pattern.compile("move|turnL|turnR|takeFuel|wait|turnAround|shieldOn|shieldOff");
     static final Pattern RELOP = Pattern.compile("lt|gt|eq");
+    static final Pattern COND = Pattern.compile("and|or|not");
     static final Pattern SENS = Pattern.compile("fuelLeft|oppLR|oppFB|numBarrels|barrelLR|barrelFB|wallDist");
-
-    // Syntax checking global vairables
-    private Stack<String> bracketStack = new Stack<>();
-    private static Map<String, String> oppositeBracket = Map.of(
-        "{", "}",
-        "}", "{",
-        "(", ")",
-        ")", "("
-    );
+    static final Pattern OP = Pattern.compile("add|sub|mul|div");
 
     //----------------------------------------------------------------
     /**
@@ -43,14 +38,8 @@ public class Parser {
         s.useDelimiter("\\s+|(?=[{}(),;])|(?<=[{}(),;])");
         // THE PARSER GOES HERE
         // Call the parseProg method for the first grammar rule (PROG) and return the node
-
-        // Build tree
-        ProgramNode root = parseProg(s);
-
-        // Check for uneven brackets
-        if(!bracketStack.isEmpty()) { throw new ParserFailureException("Bracket number uneven"); }
         
-        return root;
+        return parseProg(s);
     }
 
     //----------------------------------------------------------------
@@ -93,43 +82,48 @@ public class Parser {
      * next scanner string or throw error if it's undefined
      */
     private ProgramNode parseAct(Scanner s){
-        // Base case
-        if(!s.hasNext()) {return null;}
-
         // Error checking
-        String action = s.next();
-        require(";", "expecting: ;  At parseAct", s);
+        String action = require(ACT, "expected act", s);
         
+        // Node to Return
+        ProgramNode act = null;
 
-        // returns
-        if (action.equals("move")) {
-            return new Move();
+        // Act nodes without any extra parameters
+        if      (action.equals("turnL"))        { act = new TurnL(); } 
+        else if (action.equals("turnR"))        { act = new TurnR(); } 
+        else if (action.equals("takeFuel"))     { act = new TakeFuel(); } 
+        else if (action.equals("shieldOn"))     { act = new ShieldOn(); }
+        else if (action.equals("shieldOff"))    { act = new ShieldOff(); }
+        else if (action.equals("turnAround"))   { act = new TurnAround(); }
+
+        // TODO: Excute Tester error
+
+        // Act nodes with parameters
+        if (action.equals("move")) { 
+            IntNode repeat = null;
+            if (s.hasNext(OPENPAREN)){
+                s.next();
+                repeat = parseExpr(s);
+                require(CLOSEPAREN, "expected )", s);   
+            } else {
+                repeat = new Num(1);
+            }
+            act = new Move(repeat); 
         } 
-        else if (action.equals("turnL")) {
-            return new TurnL();
+        else if (action.equals("wait")){ 
+            IntNode repeat = null;
+            if (s.hasNext(OPENPAREN)){
+                s.next();
+                repeat = parseExpr(s);
+                require(CLOSEPAREN, "expected )", s);   
+            } else {
+                repeat = new Num(1);
+            }
+            act = new Wait(repeat); 
         } 
-        else if (action.equals("turnR")) {
-            return new TurnR();
-        } 
-        else if (action.equals("takeFuel")) {
-            return new TakeFuel();
-        } 
-        else if (action.equals("wait")) {
-            return new Wait();
-        } 
-        else if (action.equals("shieldOn")) {
-            return new ShieldOn();
-        }
-        else if (action.equals("shieldOff")) {
-            return new ShieldOff();
-        }
-        else if (action.equals("turnAround")) {
-            return new TurnAround();
-        }
-        else {
-            fail(String.format("expected ACTION node, got %s", action), s);
-            return null;
-        }
+        
+        require(";", "expecting: ;  At parseAct", s);
+        return act;
     }
 
     /**
@@ -153,7 +147,7 @@ public class Parser {
      */
     private ArrayList<ProgramNode> parseBlock(Scanner s){
         // Syntax checks
-        addBracket(require(OPENBRACE, "Expected: {", s));
+        require(OPENBRACE, "Expected: {", s);
 
         // Store all child node of this loop
         ArrayList<ProgramNode> nodes = new ArrayList<>();
@@ -165,7 +159,7 @@ public class Parser {
 
         // Syntax checks
         if(nodes.isEmpty()) { fail("BLOCK is empty", s);}
-        removeBracket(require(CLOSEBRACE, "ecpected: }", s), s);
+        require(CLOSEBRACE, "ecpected: }", s);
 
         return nodes;
     }
@@ -175,11 +169,22 @@ public class Parser {
      * Retuens a If node
      */
     private ProgramNode parseIf(Scanner s){
+        //parsing if
         require("if", "expected if", s);
+        require(OPENPAREN, "Conditions must start with (", s);
         BoolNode cond = parseCond(s);
-        List<ProgramNode> childList = parseBlock(s);
+        require(CLOSEPAREN, "Require )", s);
 
-        return new If(childList, cond);
+        List<ProgramNode> ifList = parseBlock(s);
+
+        //parsing else
+        if (s.hasNext("else")) {
+            s.next();
+            List<ProgramNode> elseList = parseBlock(s);
+            return new If(ifList, elseList, cond);
+        }
+
+        return new If(ifList, cond);
     }
 
     /**
@@ -188,55 +193,122 @@ public class Parser {
      */
     private ProgramNode parseWhile(Scanner s){
         require("while", "expected while", s);
+        require(OPENPAREN, "Conditions must start with (", s);
         BoolNode cond = parseCond(s);
+        require(CLOSEPAREN, "Require )", s);
+
         List<ProgramNode> childList = parseBlock(s);
 
         return new While(childList, cond);
     }
 
     /**
-     * Parse the COND statement
+     * Parse the outer COND statement
      * returns a BoolNode
      */
     private BoolNode parseCond(Scanner s){
-        // Check the syntax and get the RELOP, SENS and NUM strings
-        require(OPENPAREN, "Conditions must start with (", s);
-        String relop = require(RELOP, "Require a relop expression", s);
-        require(OPENPAREN, "Conditions must start with (", s);
-        String sens = require(SENS, relop, s);
-        require(",", "Require ,", s);
-        int num = requireInt(NUMPAT, sens, s);
-        require(CLOSEPAREN, "Require )", s);
-        require(CLOSEPAREN, "Require )", s);
+        // Check the syntax and get the condition strings
+        if (s.hasNext(RELOP)){
+            return parseRelop(s);
+        }
+        else if (s.hasNext("and")){
+            s.next();
+            require(OPENPAREN, "expected (", s);
+            BoolNode first = parseCond(s);
+            require(",", "expected ,", s);
+            BoolNode second = parseCond(s);
+            require(CLOSEPAREN, "expected )", s);
+            return new And(first, second);
+        }
+        else if (s.hasNext("or")){
+            s.next();
+            require(OPENPAREN, "expected (", s);
+            BoolNode first = parseCond(s);
+            require(",", "expected ,", s);
+            BoolNode second = parseCond(s);
+            require(CLOSEPAREN, "expected )", s);
+            return new Or(first, second);
+        }
+        else if (s.hasNext("not")){
+            s.next();
+            require(OPENPAREN, "expected (", s);
+            BoolNode first = parseCond(s);
+            require(CLOSEPAREN, "expected )", s);
+            return new Not(first);
+        }
 
-        // Turn those strings into objects
-        SensNode sensNode = parseSens(sens);
-        BoolNode relopNode = parseRelop(relop, num, sensNode);
-
-        return new Condition(relopNode);
+        fail("Cond statement incorrect", s);
+        return null;
     }
+
+
 
     /**
      * Parses and returns a BoolNode
      */
-    private BoolNode parseRelop(String s, int i, SensNode sens){
-        if (s.equals("lt")){
-            return new LesserThan(sens, i);
+    private BoolNode parseRelop(Scanner s){
+        String relop = s.next();
+        require(OPENPAREN, "Expected (", s);
+
+        if (relop.equals("lt")){
+            IntNode first = parseExpr(s);
+            require(",", "Expected ,", s);
+            IntNode second = parseExpr(s);
+            require(CLOSEPAREN, "expected )", s);
+            return new LesserThan(first, second);
         }
-        if (s.equals("gt")){
-            return new GreaterThan(sens, i);
+        else if (relop.equals("gt")){
+            IntNode first = parseExpr(s);
+            require(",", "Expected ,", s);
+            IntNode second = parseExpr(s);
+            require(CLOSEPAREN, "expected )", s);
+            return new GreaterThan(first, second);
         }
-        if (s.equals("eq")){
-            return new Equal(sens, i);
+        else if (relop.equals("eq")){
+            IntNode first = parseExpr(s);
+            require(",", "Expected ,", s);
+            IntNode second = parseExpr(s);
+            require(CLOSEPAREN, "expected )", s);
+            return new Equal(first, second);
         }
         
-        throw new IllegalArgumentException("RelopNode wrong: " + s);
+        throw new ParserFailureException("RelopNode wrong, got: " + s.next());
+    }
+
+    /**
+     * Parses the EXPR statement
+     */
+    private IntNode parseExpr(Scanner s){
+        if (s.hasNextInt()){
+            return new Num(s.nextInt());
+        }
+        else if (s.hasNext(SENS)){
+            return parseSens(s.next());
+        }
+        else if(s.hasNext(OP)){
+            String op = s.next();
+
+            // Syntax checks and recursion
+            require(OPENPAREN, "Expected (", s);
+            IntNode first = parseExpr(s);
+            require(",", "Expected ,", s);
+            IntNode second = parseExpr(s);
+            require(CLOSEPAREN, "expected )", s);
+
+            // Find the right type of node
+            if      (op.equals("add"))  { return new Add(first, second); }
+            else if (op.equals("sub"))  { return new Subtract(first, second); }
+            else if (op.equals("mul"))  { return new Mulitiply(first, second); }
+            else if (op.equals("div"))  { return new Divide(first, second); }
+        }
+
+        throw new ParserFailureException("Expr wrong, got: " + s.next());
     }
 
     /**
      * Parses and returns a sensNode
      */
-    private SensNode parseSens(String s){
+    private IntNode parseSens(String s){
         if (s.equals("fuelLeft")) {
             return new FuelLeft();
         } 
@@ -259,34 +331,7 @@ public class Parser {
             return new WallDist();
         }
 
-        throw new IllegalArgumentException("SensNode wrong");
-    }
-
-    //----------------------------------------------------------------
-    /**
-     * Helper functions for the main parser functions
-     */
-
-    /** 
-     *Adds a bracket into bracketStack
-    */
-    private void addBracket(String bracket){ bracketStack.add(bracket); }
-
-    /**
-     * Checks if the closing bracket matches the opening bracket
-     * If not, throw an exception
-     * Else remove the matching bracket
-     */
-    private void removeBracket(String bracket, Scanner s){
-        if (bracketStack.isEmpty()) { 
-            fail("Too many closing brackets", null); 
-        }
-        else if (!bracketStack.peek().equals(oppositeBracket.get(bracket))){
-            fail("Incorrect closing bracket", s);
-        }
-        else {
-            bracketStack.pop();
-        }
+        throw new IllegalArgumentException("IntNode wrong");
     }
 
     //----------------------------------------------------------------
@@ -384,7 +429,7 @@ interface BoolNode {
  * Interface for SENS nodes
  * evaluate returns an int
  */
-interface SensNode {
+interface IntNode {
     public int evaluate(Robot r);
 }
 
@@ -421,9 +466,19 @@ class Prog implements ProgramNode{
  * Move robot and if there's a next instructin, exicute it
  */
 class Move implements ProgramNode{
+    private IntNode repeat;
+
+    public Move(IntNode repeat){
+        this.repeat = repeat;
+    }
 
     @Override
-    public void execute(Robot robot) { robot.move(); }
+    public void execute(Robot robot) { 
+        int rep = repeat.evaluate(robot);
+        for (int i = 0; i < rep; i++){
+            robot.move(); 
+        }
+    }
 
     @Override
     public String toString(){
@@ -435,9 +490,19 @@ class Move implements ProgramNode{
  * wait and if there's a next instructin, exicute it
  */
 class Wait implements ProgramNode{
+    private IntNode repeat;
+
+    public Wait(IntNode repeat){
+        this.repeat = repeat;
+    }
 
     @Override
-    public void execute(Robot robot) { robot.idleWait(); }
+    public void execute(Robot robot) { 
+        int rep = repeat.evaluate(robot);
+        for (int i = 0; i < rep; i++){
+            robot.idleWait(); 
+        }
+    }
 
     @Override
     public String toString(){
@@ -534,18 +599,31 @@ class ShieldOff implements ProgramNode{
  * If the bool node is ture then exicute all of the programNodes
  */
 class If implements ProgramNode{
-    List<ProgramNode> cNodes = new ArrayList<>();
+    List<ProgramNode> ifNodes = new ArrayList<>();
+    List<ProgramNode> elseNodes = new ArrayList<>();
     BoolNode bool;
 
-    public If(List<ProgramNode> cNodes, BoolNode bool){
-        this.cNodes = cNodes;
+    //constructor for if
+    public If(List<ProgramNode> ifNodes, BoolNode bool){
+        this.ifNodes = ifNodes;
+        this.bool = bool;
+    }
+
+    // constructor for if else
+    public If(List<ProgramNode> ifNodes, List<ProgramNode> elseNodes, BoolNode bool){
+        this.ifNodes = ifNodes;
+        this.elseNodes = elseNodes;
         this.bool = bool;
     }
 
     @Override
     public void execute(Robot robot) {
         if (bool.evaluate(robot)){
-            for (ProgramNode child : cNodes){
+            for (ProgramNode child : ifNodes){
+                child.execute(robot);
+            }
+        } else {
+            for (ProgramNode child : elseNodes){
                 child.execute(robot);
             }
         }
@@ -553,7 +631,7 @@ class If implements ProgramNode{
 
     @Override
     public String toString(){
-        return "(if " + bool.toString() + cNodes.toString() + ")";
+        return "if " + bool.toString() + ifNodes.toString() + " else " + elseNodes.toString();
     }
 }
 
@@ -640,22 +718,22 @@ class Condition implements BoolNode{
  * Returns true if both children are equal
  */
 class Equal implements BoolNode {
-    private SensNode sens;
-    private int num;
+    private IntNode first;
+    private IntNode second;
 
-    public Equal(SensNode sens, int num){
-        this.sens = sens;
-        this.num = num;
+    public Equal(IntNode first, IntNode second){
+        this.first = first;
+        this.second = second;
     }
 
     @Override
     public boolean evaluate(Robot r) {
-        return sens.evaluate(r) == num;
+        return first.evaluate(r) == second.evaluate(r);
     }
 
     @Override
     public String toString(){
-        return String.format("(%s == %d)", sens.toString(), num);
+        return String.format("(%s == %s)", first.toString(), second.toString());
     }
 }
 
@@ -664,22 +742,22 @@ class Equal implements BoolNode {
  * Returns true if child 1 is greater than child 2
  */
 class GreaterThan implements BoolNode {
-    private SensNode sens;
-    private int num;
+    private IntNode first;
+    private IntNode second;
 
-    public GreaterThan(SensNode sens, int num){
-        this.sens = sens;
-        this.num = num;
+    public GreaterThan(IntNode first, IntNode second){
+        this.first = first;
+        this.second = second;
     }
 
     @Override
     public boolean evaluate(Robot r) {
-        return sens.evaluate(r) > num;
+        return first.evaluate(r) > second.evaluate(r);
     }
 
     @Override
     public String toString(){
-        return String.format("(%s > %d)", sens.toString(), num);
+        return String.format("(%s > %s)", first.toString(), second.toString());
     }
 }
 
@@ -688,29 +766,29 @@ class GreaterThan implements BoolNode {
  * Returns true if child 1 is less than child 2
  */
 class LesserThan implements BoolNode {
-    private SensNode sens;
-    private int num;
+    private IntNode first;
+    private IntNode second;
 
-    public LesserThan(SensNode sens, int num){
-        this.sens = sens;
-        this.num = num;
+    public LesserThan(IntNode first, IntNode second){
+        this.first = first;
+        this.second = second;
     }
 
     @Override
     public boolean evaluate(Robot r) {
-        return sens.evaluate(r) < num;
+        return first.evaluate(r) < second.evaluate(r);
     }
 
     @Override
     public String toString(){
-        return String.format("(%s > %d)", sens.toString(), num);
+        return String.format("(%s < %s)", first.toString(), second.toString());
     }
 }
 
 /**
  * Returns the fuel level of the robot
  */
-class FuelLeft implements SensNode{
+class FuelLeft implements IntNode{
 
     @Override
     public int evaluate(Robot r) {
@@ -726,7 +804,7 @@ class FuelLeft implements SensNode{
 /**
  * Returns the Opponents's Left or right position
  */
-class OppLR implements SensNode{
+class OppLR implements IntNode{
 
     @Override
     public int evaluate(Robot r) {
@@ -742,7 +820,7 @@ class OppLR implements SensNode{
 /**
  * Returns the opponent's fowards and backwards position
  */
-class OppFB implements SensNode{
+class OppFB implements IntNode{
 
     @Override
     public int evaluate(Robot r) {
@@ -758,7 +836,7 @@ class OppFB implements SensNode{
 /**
  * Returns the number of barrels on the board
  */
-class NumBarrels implements SensNode{
+class NumBarrels implements IntNode{
 
     @Override
     public int evaluate(Robot r) {
@@ -774,7 +852,7 @@ class NumBarrels implements SensNode{
 /**
  * Returns the Left and right position of the closest barrel
  */
-class BarrelLR implements SensNode{
+class BarrelLR implements IntNode{
 
     @Override
     public int evaluate(Robot r) {
@@ -790,7 +868,7 @@ class BarrelLR implements SensNode{
 /**
  * Returns the fowards backwards position of the closest barrel
  */
-class BarrelFB implements SensNode{
+class BarrelFB implements IntNode{
 
     @Override
     public int evaluate(Robot r) {
@@ -806,7 +884,7 @@ class BarrelFB implements SensNode{
 /**
  * Returns the distance to the wall of the robot
  */
-class WallDist implements SensNode{
+class WallDist implements IntNode{
 
     @Override
     public int evaluate(Robot r) {
@@ -816,5 +894,181 @@ class WallDist implements SensNode{
     @Override
     public String toString(){
         return "WallDist";
+    }
+}
+
+/**
+ * Returns the a number
+ */
+class Num implements IntNode{
+    private int num;
+
+    public Num(int num){
+        this.num = num;
+    }
+
+    @Override
+    public int evaluate(Robot r) {
+        return num;
+    }
+
+    @Override
+    public String toString(){
+        return "WallDist";
+    }
+}
+
+/**
+ * Add the 2 exressions given
+ */
+class Add implements IntNode{
+    IntNode int1, int2;
+
+    public Add(IntNode int1, IntNode int2){
+        this.int1 = int1;
+        this.int2 = int2;
+    }
+
+    @Override
+    public int evaluate(Robot r) {
+        return int1.evaluate(r) + int2.evaluate(r);
+    }
+
+    @Override
+    public String toString(){
+        return String.format("%s + %s", int1.toString(), int2.toString());
+    }
+}
+
+/**
+ * Subtract the 2 exressions given
+ */
+class Subtract implements IntNode{
+    IntNode int1, int2;
+
+    public Subtract(IntNode int1, IntNode int2){
+        this.int1 = int1;
+        this.int2 = int2;
+    }
+
+    @Override
+    public int evaluate(Robot r) {
+        return int1.evaluate(r) - int2.evaluate(r);
+    }
+
+    @Override
+    public String toString(){
+        return String.format("(%s - %s)", int1.toString(), int2.toString());
+    }
+}
+
+/**
+ * Mulitiply the 2 exressions given
+ */
+class Mulitiply implements IntNode{
+    IntNode int1, int2;
+
+    public Mulitiply(IntNode int1, IntNode int2){
+        this.int1 = int1;
+        this.int2 = int2;
+    }
+
+    @Override
+    public int evaluate(Robot r) {
+        return int1.evaluate(r) * int2.evaluate(r);
+    }
+
+    @Override
+    public String toString(){
+        return String.format("(%s * %s)", int1.toString(), int2.toString());
+    }
+}
+
+/**
+ * Divide the 2 exressions given
+ */
+class Divide implements IntNode{
+    IntNode int1, int2;
+
+    public Divide(IntNode int1, IntNode int2){
+        this.int1 = int1;
+        this.int2 = int2;
+    }
+
+    @Override
+    public int evaluate(Robot r) {
+        return int1.evaluate(r) / int2.evaluate(r);
+    }
+
+    @Override
+    public String toString(){
+        return String.format("(%s / %s)", int1.toString(), int2.toString());
+    }
+}
+
+/**
+ * represents the and boolean operation
+ */
+class And implements BoolNode {
+    BoolNode first;
+    BoolNode second;
+
+    public And(BoolNode first, BoolNode second){
+        this.first = first;
+        this.second = second;
+    }
+
+    @Override
+    public boolean evaluate(Robot r) {
+        return first.evaluate(r) && second.evaluate(r);
+    }
+
+    @Override
+    public String toString(){
+        return "and";
+    }
+}
+
+/**
+ * represents the or boolean operation
+ */
+class Or implements BoolNode {
+    BoolNode first;
+    BoolNode second;
+
+    public Or(BoolNode first, BoolNode second){
+        this.first = first;
+        this.second = second;
+    }
+
+    @Override
+    public boolean evaluate(Robot r) {
+        return first.evaluate(r) || second.evaluate(r);
+    }
+
+    @Override
+    public String toString(){
+        return "or";
+    }
+}
+
+/**
+ * represents the not boolean operation
+ */
+class Not implements BoolNode {
+    BoolNode first;
+
+    public Not(BoolNode first){
+        this.first = first;
+    }
+
+    @Override
+    public boolean evaluate(Robot r) {
+        return !first.evaluate(r);
+    }
+
+    @Override
+    public String toString(){
+        return "not";
     }
 }
