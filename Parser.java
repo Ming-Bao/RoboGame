@@ -1128,19 +1128,37 @@ class Not implements BoolNode {
     }
 }
 
-class joe{
-    static int j = 0;
-    public static void Joe(){
-        j++;
-        System.out.println("=======================" + j + "====================================");
-    }
-}
+/**
+ * Class that sets a variable to a value at runtime
+ */
+class SetVairable implements ProgramNode {
+    private String key;
+    private IntNode value;
 
-class test implements ProgramNode{
+    public SetVairable(String key, IntNode value){
+        this.key = key;
+        this.value = value;
+    }
 
     @Override
     public void execute(Robot robot) {
-        joe.Joe();
+        Vairable.add(key, value.evaluate(robot));
     }
 
+}
+
+/**
+ * Stores static vairables that can be accessed anywhere within the abstract syntax tree
+ */
+class Vairable{
+    private static Map<String, Integer> variable = new HashMap<>();
+
+    public static void add(String key, int value){
+        variable.put(key, value);
+    }
+
+    public static int get(String key){
+        if (variable.keySet().contains(key)){ return variable.get(key); }
+        else { add(key, 0); return 0;}
+    }
 }
