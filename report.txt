@@ -8,5 +8,4 @@ Stage 2 -
 Completed
 
 Stage 3 -
-Added optional arguments to barrelLR and barrelFB
-Added elif
+Completed

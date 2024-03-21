@@ -1,1 +1,6 @@
-move;
+$a = 3; 
+move($a);
+turnL;
+$b = 5; 
+move($b);
+turnR;

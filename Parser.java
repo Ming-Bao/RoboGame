@@ -2,6 +2,7 @@ import java.lang.reflect.Array;
 import java.util.*;
 import java.util.regex.*;
 
+import javax.lang.model.element.VariableElement;
 import javax.naming.InterruptedNamingException;
 
 /**
@@ -25,7 +26,7 @@ public class Parser {
     static final Pattern ACT = Pattern.compile("move|turnL|turnR|takeFuel|wait|turnAround|shieldOn|shieldOff");
     static final Pattern RELOP = Pattern.compile("lt|gt|eq");
     static final Pattern COND = Pattern.compile("and|or|not");
-    static final Pattern SENS = Pattern.compile("fuelLeft|oppLR|oppFB|numBarrels|barrelLR|barrelFB|wallDist");
+    static final Pattern SENS = Pattern.compile("fuelLeft|oppLR|oppFB|numBarrels|barrelLR|barrelFB|wallDist|$");
     static final Pattern OP = Pattern.compile("add|sub|mul|div");
 
     //----------------------------------------------------------------
@@ -66,10 +67,12 @@ public class Parser {
      * Parse the STMT statement
      */
     private ProgramNode parseStmt(Scanner s){
+
         if (s.hasNext(ACT))                     { return(parseAct(s)); }
         else if (s.hasNext("loop"))     { return(parseLoop(s)); }
         else if (s.hasNext("if"))       { return(parseIf(s)); }
         else if (s.hasNext("while"))    { return(parseWhile(s)); }
+        else if (s.hasNext(VAIRABLE))           { return(setVar(s));}
         else {
             fail("Expected STMT", s); 
             return null;
@@ -294,6 +297,9 @@ public class Parser {
         else if (s.hasNext(SENS)){
             return parseSens(s);
         }
+        else if (s.hasNext(VAIRABLE)){
+            return parseVar(s);
+        }
         else if(s.hasNext(OP)){
             String op = s.next();
 
@@ -327,6 +333,7 @@ public class Parser {
         else if (sensScanner.equals("oppFB"))         { sens = new OppFB(); } 
         else if (sensScanner.equals("numBarrels"))    { sens = new NumBarrels(); } 
         else if (sensScanner.equals("wallDist"))      { sens = new WallDist(); }
+        else if (sensScanner.startsWith("$"))           { sens = parseVar(s); }
 
         // SENS nodes that takes in parameters
         else if (sensScanner.equals("barrelLR")){ 
@@ -354,6 +361,35 @@ public class Parser {
         else { throw new ParserFailureException("Sens not right"); }
 
         return sens;
+    }
+
+    /**
+     * returns an intNodethat can be used in the middle of an expression and throws an error when 
+     * trying to define a new variable
+     */
+    public IntNode parseVar(Scanner s){
+
+        IntNode toReturn;
+        if (s.hasNext("=")) {
+            fail("cannot assign variable in the middle of expression", s);
+            throw new ParserFailureException(null);
+        } else {
+            toReturn = new useVariable(s.next());
+        }
+
+        return toReturn;
+    }
+
+    /**
+     * returns a setVariable programNode
+     */
+    public ProgramNode setVar(Scanner s){
+        String key = require(VAIRABLE, "Expected variable name", s);
+        require("=", "require = when assigning variables", s);
+        IntNode expr = parseExpr(s);
+        require(";", "variable declaration must end with ;", s);
+
+        return new SetVariable(key, expr);
     }
 
     //----------------------------------------------------------------
@@ -1131,26 +1167,43 @@ class Not implements BoolNode {
 /**
  * Class that sets a variable to a value at runtime
  */
-class SetVairable implements ProgramNode {
+class SetVariable implements ProgramNode {
     private String key;
     private IntNode value;
 
-    public SetVairable(String key, IntNode value){
+    public SetVariable(String key, IntNode value){
         this.key = key;
         this.value = value;
     }
 
     @Override
     public void execute(Robot robot) {
-        Vairable.add(key, value.evaluate(robot));
+        Variable.add(key, value.evaluate(robot));
     }
 
 }
 
 /**
+ * used a variable
+ */
+class useVariable implements IntNode{
+    private String key;
+
+    public useVariable(String key){
+        this.key = key;
+    }
+
+    @Override
+    public int evaluate(Robot r) {
+        return Variable.get(key);
+    }
+    
+}
+
+/**
  * Stores static vairables that can be accessed anywhere within the abstract syntax tree
  */
-class Vairable{
+class Variable{
     private static Map<String, Integer> variable = new HashMap<>();
 
     public static void add(String key, int value){
