@@ -19,6 +19,7 @@ public class Parser {
     static final Pattern CLOSEPAREN = Pattern.compile("\\)");
     static final Pattern OPENBRACE = Pattern.compile("\\{");
     static final Pattern CLOSEBRACE = Pattern.compile("\\}");
+    static final Pattern VAIRABLE = Pattern.compile("\\$[A-Za-z][A-Za-z0-9]*");
 
     // Patterns for the bigger categories
     static final Pattern ACT = Pattern.compile("move|turnL|turnR|takeFuel|wait|turnAround|shieldOn|shieldOff");
@@ -172,17 +173,27 @@ public class Parser {
         require(OPENPAREN, "Conditions must start with (", s);
         BoolNode cond = parseCond(s);
         require(CLOSEPAREN, "Require )", s);
-
         List<ProgramNode> ifList = parseBlock(s);
 
-        //parsing else
-        if (s.hasNext("else")) {
-            s.next();
-            List<ProgramNode> elseList = parseBlock(s);
-            return new If(ifList, elseList, cond);
+        //parsing elif
+        Map<BoolNode, List<ProgramNode>> elifMap = new HashMap<>();
+        while (s.hasNext("elif")){
+            require("elif", "expected elif", s);
+            require(OPENPAREN, "Conditions must start with (", s);
+            BoolNode elifCond = parseCond(s);
+            require(CLOSEPAREN, "Require )", s);
+            List<ProgramNode> elifList = parseBlock(s);
+            elifMap.put(elifCond, elifList);
         }
 
-        return new If(ifList, cond);
+        //parsing else
+        List<ProgramNode> elseList = new ArrayList<>();
+        if (s.hasNext("else")) {
+            s.next();
+            elseList = parseBlock(s);
+        }
+
+        return new If(ifList, elifMap, elseList, cond);
     }
 
     /**
@@ -281,7 +292,7 @@ public class Parser {
             return new Num(s.nextInt());
         }
         else if (s.hasNext(SENS)){
-            return parseSens(s.next());
+            return parseSens(s);
         }
         else if(s.hasNext(OP)){
             String op = s.next();
@@ -306,33 +317,43 @@ public class Parser {
     /**
      * Parses and returns a sensNode
      */
-    private IntNode parseSens(String s){
+    private IntNode parseSens(Scanner s){
+        String sensScanner = s.next();
+        IntNode sens;
 
         // SENS nodes that doesn't take any parameters
-        if (s.equals("fuelLeft")) {
-            return new FuelLeft();
-        } 
-        else if (s.equals("oppLR")) {
-            return new OppLR();
-        } 
-        else if (s.equals("oppFB")) {
-            return new OppFB();
-        } 
-        else if (s.equals("numBarrels")) {
-            return new NumBarrels();
-        } 
-        else if (s.equals("barrelLR")) {
-            return new BarrelLR();
-        } 
-        else if (s.equals("barrelFB")) {
-            return new BarrelFB();
-        }
-        else if (s.equals("wallDist")) {
-            return new WallDist();
-        }
+        if (sensScanner.equals("fuelLeft"))           { sens = new FuelLeft(); } 
+        else if (sensScanner.equals("oppLR"))         { sens = new OppLR(); } 
+        else if (sensScanner.equals("oppFB"))         { sens = new OppFB(); } 
+        else if (sensScanner.equals("numBarrels"))    { sens = new NumBarrels(); } 
+        else if (sensScanner.equals("wallDist"))      { sens = new WallDist(); }
 
-        // TODO: change this
-        throw new IllegalArgumentException("IntNode wrong");
+        // SENS nodes that takes in parameters
+        else if (sensScanner.equals("barrelLR")){ 
+            IntNode repeat = null;
+            if (s.hasNext(OPENPAREN)){
+                s.next();
+                repeat = parseExpr(s);
+                require(CLOSEPAREN, "expected )", s);   
+            } else {
+                repeat = new Num(Integer.MIN_VALUE);
+            }
+            return new BarrelLR(repeat); 
+        } 
+        else if (sensScanner.equals("barrelFB")){ 
+            IntNode repeat = null;
+            if (s.hasNext(OPENPAREN)){
+                s.next();
+                repeat = parseExpr(s);
+                require(CLOSEPAREN, "expected )", s);   
+            } else {
+                repeat = new Num(Integer.MIN_VALUE);
+            }
+            return new BarrelFB(repeat); 
+        }
+        else { throw new ParserFailureException("Sens not right"); }
+
+        return sens;
     }
 
     //----------------------------------------------------------------
@@ -602,28 +623,41 @@ class ShieldOff implements ProgramNode{
 class If implements ProgramNode{
     List<ProgramNode> ifNodes = new ArrayList<>();
     List<ProgramNode> elseNodes = new ArrayList<>();
+    Map<BoolNode, List<ProgramNode>> elifMap = new HashMap<>();
     BoolNode bool;
 
-    //constructor for if
-    public If(List<ProgramNode> ifNodes, BoolNode bool){
+    //constructor
+    public If(List<ProgramNode> ifNodes, Map<BoolNode, List<ProgramNode>> elifMap, List<ProgramNode> elseNodes, BoolNode bool){
         this.ifNodes = ifNodes;
-        this.bool = bool;
-    }
-
-    // constructor for if else
-    public If(List<ProgramNode> ifNodes, List<ProgramNode> elseNodes, BoolNode bool){
-        this.ifNodes = ifNodes;
+        this.elifMap = elifMap;
         this.elseNodes = elseNodes;
         this.bool = bool;
     }
 
     @Override
     public void execute(Robot robot) {
+        //check the if statement
         if (bool.evaluate(robot)){
             for (ProgramNode child : ifNodes){
                 child.execute(robot);
             }
-        } else {
+        }  
+        else {
+            //check the else if statements
+            for (Map.Entry<BoolNode, List<ProgramNode>> map : elifMap.entrySet()){
+                if (map.getKey().evaluate(robot)){
+                    for (ProgramNode child : map.getValue()){
+                        child.execute(robot);
+                    } 
+                }else {
+                    //skips to the next else if statement to avoid returning and skipping the else
+                    continue;
+                }
+                //returns and skip the else, if one of the conditions are true
+                return;
+            }
+
+            //execute the else statement
             for (ProgramNode child : elseNodes){
                 child.execute(robot);
             }
@@ -854,10 +888,20 @@ class NumBarrels implements IntNode{
  * Returns the Left and right position of the closest barrel
  */
 class BarrelLR implements IntNode{
+    private IntNode count;
+
+    public BarrelLR(IntNode count){
+        this.count = count;
+    }
 
     @Override
     public int evaluate(Robot r) {
-        return r.getClosestBarrelLR();
+        int num = count.evaluate(r);
+        if (num == Integer.MIN_VALUE){
+            return r.getClosestBarrelLR();
+        } else {
+            return r.getBarrelLR(num);
+        }
     }
 
     @Override
@@ -870,10 +914,20 @@ class BarrelLR implements IntNode{
  * Returns the fowards backwards position of the closest barrel
  */
 class BarrelFB implements IntNode{
+    private IntNode count;
+
+    public BarrelFB(IntNode count){
+        this.count = count;
+    }
 
     @Override
     public int evaluate(Robot r) {
-        return r.getClosestBarrelFB();
+        int num = count.evaluate(r);
+        if (num == Integer.MIN_VALUE){
+            return r.getClosestBarrelFB();
+        } else {
+            return r.getBarrelFB(num);
+        }
     }
 
     @Override
@@ -1072,4 +1126,21 @@ class Not implements BoolNode {
     public String toString(){
         return "not";
     }
+}
+
+class joe{
+    static int j = 0;
+    public static void Joe(){
+        j++;
+        System.out.println("=======================" + j + "====================================");
+    }
+}
+
+class test implements ProgramNode{
+
+    @Override
+    public void execute(Robot robot) {
+        joe.Joe();
+    }
+
 }
