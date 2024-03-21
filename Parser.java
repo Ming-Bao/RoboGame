@@ -96,8 +96,6 @@ public class Parser {
         else if (action.equals("shieldOff"))    { act = new ShieldOff(); }
         else if (action.equals("turnAround"))   { act = new TurnAround(); }
 
-        // TODO: Excute Tester error
-
         // Act nodes with parameters
         if (action.equals("move")) { 
             IntNode repeat = null;
@@ -309,6 +307,8 @@ public class Parser {
      * Parses and returns a sensNode
      */
     private IntNode parseSens(String s){
+
+        // SENS nodes that doesn't take any parameters
         if (s.equals("fuelLeft")) {
             return new FuelLeft();
         } 
@@ -331,6 +331,7 @@ public class Parser {
             return new WallDist();
         }
 
+        // TODO: change this
         throw new IllegalArgumentException("IntNode wrong");
     }
 
