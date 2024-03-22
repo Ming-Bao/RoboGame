@@ -1181,6 +1181,10 @@ class SetVariable implements ProgramNode {
         Variable.add(key, value.evaluate(robot));
     }
 
+    @Override
+    public String toString(){
+        return(String.format("Set Variable: %s", key));
+    }
 }
 
 /**
@@ -1198,6 +1202,10 @@ class useVariable implements IntNode{
         return Variable.get(key);
     }
     
+    @Override
+    public String toString(){
+        return(String.format("Use Variable: %s", key));
+    }
 }
 
 /**
@@ -1213,5 +1221,10 @@ class Variable{
     public static int get(String key){
         if (variable.keySet().contains(key)){ return variable.get(key); }
         else { add(key, 0); return 0;}
+    }
+
+    @Override
+    public String toString(){
+        return(String.format("All Variable: %s", variable.toString()));
     }
 }
